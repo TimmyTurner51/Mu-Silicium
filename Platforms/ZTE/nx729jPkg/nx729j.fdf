@@ -99,11 +99,17 @@ READ_LOCK_STATUS   = TRUE
   INF QcomPkg/Drivers/IortDtDxe/IortDtDxe.inf
 
   # Device Tree
-  #INF EmbeddedPkg/Drivers/DtPlatformDxe/DtPlatformDxe.inf
-  #FILE FREEFORM = 25462CDA-221F-47DF-AC1D-259CFAA4E326 {
-  #  SECTION RAW = nx729jPkg/FdtBlob/sm8550-zte-nx729j.dtb
-  #  SECTION UI = "DeviceTreeBlob"
-  #}
+  #
+  # DisplayDxe takes the MDSS/DSI base addresses and power topology from a device tree,
+  # not from ACPI. With this commented out Mu boots ACPI-only, DisplayDxe cannot map MDSS
+  # ("Error!!! falied to allocate MDSS base addr"), falls back to SWRender mode, and the
+  # panel stays black. Nothing on the ACPI side describes the display controllers, so the
+  # DT has to be supplied here. Same arrangement as pongPkg.
+  INF EmbeddedPkg/Drivers/DtPlatformDxe/DtPlatformDxe.inf
+  FILE FREEFORM = 25462CDA-221F-47DF-AC1D-259CFAA4E326 {
+    SECTION RAW = nx729jPkg/FdtBlob/sm8550-zte-nx729j.dtb
+    SECTION UI = "DeviceTreeBlob"
+  }
 
   !include QcomPkg/Extra.fdf.inc
 

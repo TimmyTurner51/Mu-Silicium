@@ -34,6 +34,14 @@ APRIORI DXE {
   INF Binaries/nx729j/QcomPkg/Drivers/I2CDxe/I2CDxe.inf
   INF Binaries/nx729j/QcomPkg/Drivers/SPMIDxe/SPMIDxe.inf
 
+  #
+  # Kettle: Qualcomm's reset driver first. The MdeModulePkg one below can
+  # only warm-reset, so EfiResetShutdown turned into a reboot and the menu's
+  # "Power Off" booted the image again. Other platforms (alioth, 9707f)
+  # put the vendor driver ahead of it the same way.
+  #
+  INF Binaries/nx729j/QcomPkg/Drivers/ResetRuntimeDxe/ResetRuntimeDxe.inf
+
   INF MdeModulePkg/Universal/ResetSystemRuntimeDxe/ResetSystemRuntimeDxe.inf
 
   INF Binaries/nx729j/QcomPkg/Drivers/PmicDxe/PmicDxeLa.inf

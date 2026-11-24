@@ -1,0 +1,14 @@
+Compiled from the Kettle tree's kernel/dts/qcom/sm8550-nx729j.dts (mainline 7.3.3, arm64).
+
+Why this DTB is in the firmware: DisplayDxe is a Qualcomm DXE driver that locates MDSS and the
+DSI controllers by walking a device tree. Mu's nx729j ACPI tables describe no display hardware
+at all, so without this blob DisplayDxe fails to map the MDSS base address, drops to SWRender
+mode, and the panel never lights. DtPlatformDxe publishes this blob to it.
+
+The panel itself is not described here for DisplayDxe's benefit: it detects the panel over DSI
+and matches one of the vendor XMLs already embedded from Binaries/nx729j/RawFiles (including
+Panel_zte_bf068_rm692h0_6p97_magic_dsc_cmd.xml, which is this device's panel). All this blob
+has to provide is display-subsystem@ae00000 (qcom,sm8550-mdss) and dsi@ae94000/ae96000
+(qcom,mdss-dsi-ctrl), the same arrangement pongPkg uses.
+
+Keep it small: FD_SIZE is 0x300000 and the FD is already full.
