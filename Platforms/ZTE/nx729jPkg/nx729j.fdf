@@ -98,6 +98,9 @@ READ_LOCK_STATUS   = TRUE
   # IORT DT
   INF QcomPkg/Drivers/IortDtDxe/IortDtDxe.inf
 
+  # Boot diagnostics, persisted to the logfs partition and readable over EDL
+  INF SiliciumPkg/Drivers/KettleLogDxe/KettleLogDxe.inf
+
   # Device Tree
   #
   # DisplayDxe takes the MDSS/DSI base addresses and power topology from a device tree,

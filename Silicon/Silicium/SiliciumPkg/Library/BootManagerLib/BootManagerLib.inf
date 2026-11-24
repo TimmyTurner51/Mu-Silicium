@@ -36,15 +36,22 @@
   MsBootOptionsLib
   BootGraphicsLib
   DevicePathLib
+  UefiBootManagerLib
   PrintLib
+  BaseLib
+  BaseMemoryLib
+  FdtLib
 
 [Pcd]
   gEfiMdePkgTokenSpaceGuid.PcdPlatformBootTimeOut
 
 [Guids]
   gEfiEndOfDxeEventGroupGuid
+  gFdtTableGuid
 
 [Protocols]
   gKeypadDeviceProtocolGuid
   gEfiGraphicsOutputProtocolGuid
+  gEfiSimpleFileSystemProtocolGuid
   gEfiSimpleTextInputExProtocolGuid
+  gEfiHiiFontProtocolGuid

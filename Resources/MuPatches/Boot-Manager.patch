@@ -1,5 +1,5 @@
 diff --git a/MdeModulePkg/Application/BootManagerMenuApp/BootManagerMenu.c b/MdeModulePkg/Application/BootManagerMenuApp/BootManagerMenu.c
-index ef19319614..72b399bfa0 100644
+index 5bba6ea..85f70c2 100644
 --- a/MdeModulePkg/Application/BootManagerMenuApp/BootManagerMenu.c
 +++ b/MdeModulePkg/Application/BootManagerMenuApp/BootManagerMenu.c
 @@ -6,6 +6,8 @@ SPDX-License-Identifier: BSD-2-Clause-Patent
@@ -106,11 +106,36 @@ index ef19319614..72b399bfa0 100644
  }
  
  /**
+@@ -904,10 +925,22 @@ BdsSetConsoleMode (
+ 
+             if (Index == MaxTextMode) {
+               //
+-              // If required text mode is not supported, return error.
++              // Kettle: the required text mode does not exist. Returning an
++              // error here meant the boot menu was never drawn at all, because
++              // the console cell size sets how many columns fit -- above a 13px
++              // cell an 80-column mode no longer exists on this 1116px panel.
++              // The resolution is already correct, so keep the current mode and
++              // let the menu lay itself out for it.
+               //
++              DEBUG ((
++                DEBUG_WARN,
++                "%a: text mode %dx%d unavailable, keeping current mode\n",
++                __func__,
++                NewColumns,
++                NewRows
++                ));
+               FreePool (Info);
+-              return EFI_UNSUPPORTED;
++              return EFI_SUCCESS;
+             }
+           }
+         } else {
 diff --git a/MdeModulePkg/Application/BootManagerMenuApp/BootManagerMenu.h b/MdeModulePkg/Application/BootManagerMenuApp/BootManagerMenu.h
-index 876237df18..2aa50e256e 100644
+index 697a44a..8b45ad1 100644
 --- a/MdeModulePkg/Application/BootManagerMenuApp/BootManagerMenu.h
 +++ b/MdeModulePkg/Application/BootManagerMenuApp/BootManagerMenu.h
-@@ -23,7 +23,7 @@ SPDX-License-Identifier: BSD-2-Clause-Patent
+@@ -22,7 +22,7 @@ SPDX-License-Identifier: BSD-2-Clause-Patent
  #include <Protocol/BootLogo.h>
  
  #define TITLE_TOKEN_COUNT  1
@@ -119,3 +144,510 @@ index 876237df18..2aa50e256e 100644
  
  typedef struct _BOOT_MENU_SCREEN {
    UINTN    StartCol;
+diff --git a/MdeModulePkg/Universal/Console/GraphicsConsoleDxe/GraphicsConsole.c b/MdeModulePkg/Universal/Console/GraphicsConsoleDxe/GraphicsConsole.c
+index 5cf4a1b..3ba35a0 100644
+--- a/MdeModulePkg/Universal/Console/GraphicsConsoleDxe/GraphicsConsole.c
++++ b/MdeModulePkg/Universal/Console/GraphicsConsoleDxe/GraphicsConsole.c
+@@ -208,6 +208,67 @@ Error:
+   @retval EFI_INVALID_PARAMETER        The parameters are invalid.
+ 
+ **/
++//
++// Kettle: console cell size in pixels. Runtime rather than a macro so the
++// settings screen can change it and have the choice persist across boots.
++//
++UINTN  mKettleCellWidth  = KETTLE_DEFAULT_CELL_WIDTH;
++UINTN  mKettleCellHeight = KETTLE_DEFAULT_CELL_HEIGHT;
++
++STATIC EFI_GUID  mKettleSettingsGuid = {
++  0x2a7d61f4, 0x8c35, 0x4b92, { 0x9e, 0x14, 0x6d, 0x08, 0x53, 0xab, 0x7f, 0x21 }
++};
++
++STATIC CONST KETTLE_CELL_SIZE  mKettleCellSizes[] = {
++  { 8,  19 },
++  { 13, 38 },
++  { 16, 38 },
++  { 19, 38 },
++};
++
++#define KETTLE_CELL_SIZE_COUNT  (sizeof (mKettleCellSizes) / sizeof (mKettleCellSizes[0]))
++
++/**
++  Kettle: apply the persisted console cell size.
++
++  Called before the text mode table is built, because the cell size decides how
++  many columns and rows exist. Falls back to the default when the variable is
++  absent, which is the state on a freshly flashed device.
++**/
++STATIC
++VOID
++KettleApplyConsoleScale (
++  VOID
++  )
++{
++  EFI_STATUS       Status;
++  KETTLE_SETTINGS  Settings;
++  UINTN            Size;
++  UINT32           Index;
++
++  Size   = sizeof (Settings);
++  Status = gRT->GetVariable (
++                  L"KettleSettings",
++                  &mKettleSettingsGuid,
++                  NULL,
++                  &Size,
++                  &Settings
++                  );
++  if (EFI_ERROR (Status) || (Size < sizeof (Settings)) ||
++      (Settings.Signature != KETTLE_SETTINGS_SIGNATURE))
++  {
++    return;
++  }
++
++  Index = Settings.ConsoleScale;
++  if (Index >= KETTLE_CELL_SIZE_COUNT) {
++    Index = 1;
++  }
++
++  mKettleCellWidth  = mKettleCellSizes[Index].Width;
++  mKettleCellHeight = mKettleCellSizes[Index].Height;
++}
++
+ EFI_STATUS
+ InitializeGraphicsConsoleTextMode (
+   IN UINT32                       HorizontalResolution,
+@@ -236,13 +297,27 @@ InitializeGraphicsConsoleTextMode (
+   // Compute the maximum number of text Rows and Columns that this current graphics mode can support.
+   // To make graphics console work well, MaxColumns and MaxRows should not be zero.
+   //
+-  MaxColumns = HorizontalResolution / EFI_GLYPH_WIDTH;
+-  MaxRows    = VerticalResolution / EFI_GLYPH_HEIGHT;
++  MaxColumns = HorizontalResolution / CONSOLE_GLYPH_WIDTH;
++  MaxRows    = VerticalResolution / CONSOLE_GLYPH_HEIGHT;
+ 
+   //
+   // According to UEFI spec, all output devices support at least 80x25 text mode.
+-  //
+-  ASSERT ((MaxColumns >= 80) && (MaxRows >= 25));
++  // The cell size is chosen so 80 columns fit the panel, which is what keeps
++  // mode 0 compliant. Reported here so a bad cell size is visible in a log.
++  //
++  DEBUG ((
++    DEBUG_INFO,
++    "GraphicsConsole: %dx%d px, %dx%d cell -> %dx%d cells\n",
++    HorizontalResolution,
++    VerticalResolution,
++    CONSOLE_GLYPH_WIDTH,
++    CONSOLE_GLYPH_HEIGHT,
++    MaxColumns,
++    MaxRows
++    ));
++  if ((MaxColumns < 80) || (MaxRows < 25)) {
++    DEBUG ((DEBUG_WARN, "GraphicsConsole: panel cannot hold 80x25 with this cell size\n"));
++  }
+ 
+   //
+   // Add full screen mode to the last entry.
+@@ -269,27 +344,50 @@ InitializeGraphicsConsoleTextMode (
+   //
+   // Mode 0 and mode 1 is for 80x25, 80x50 according to UEFI spec.
+   //
++  // Kettle: the 80-column modes are clamped to what physically fits. With the
++  // 13px cell they always do, but the clamp keeps a too-large cell from
++  // producing negative space. Centring is done in signed arithmetic and
++  // floored at zero -- the unsigned form underflowed to a huge offset and sent
++  // every glyph blit far outside the framebuffer.
++  //
+   ValidCount = 0;
+ 
+-  NewModeBuffer[ValidCount].Columns       = 80;
+-  NewModeBuffer[ValidCount].Rows          = 25;
++  NewModeBuffer[ValidCount].Columns = (MaxColumns < 80) ? MaxColumns : 80;
++  NewModeBuffer[ValidCount].Rows    = (MaxRows    < 25) ? MaxRows    : 25;
++  if (NewModeBuffer[ValidCount].Columns == 0) {
++    NewModeBuffer[ValidCount].Columns = 1;
++  }
++
++  if (NewModeBuffer[ValidCount].Rows == 0) {
++    NewModeBuffer[ValidCount].Rows = 1;
++  }
++
+   NewModeBuffer[ValidCount].GopWidth      = HorizontalResolution;
+   NewModeBuffer[ValidCount].GopHeight     = VerticalResolution;
+   NewModeBuffer[ValidCount].GopModeNumber = GopModeNumber;
+-  NewModeBuffer[ValidCount].DeltaX        = (HorizontalResolution - (NewModeBuffer[ValidCount].Columns * EFI_GLYPH_WIDTH)) >> 1;
+-  NewModeBuffer[ValidCount].DeltaY        = (VerticalResolution - (NewModeBuffer[ValidCount].Rows * EFI_GLYPH_HEIGHT)) >> 1;
++  NewModeBuffer[ValidCount].DeltaX        = (((INTN)HorizontalResolution - (INTN)(NewModeBuffer[ValidCount].Columns * CONSOLE_GLYPH_WIDTH)) >= 0) ?
++                                            (((INTN)HorizontalResolution - (INTN)(NewModeBuffer[ValidCount].Columns * CONSOLE_GLYPH_WIDTH)) >> 1) : 0;
++  NewModeBuffer[ValidCount].DeltaY        = (((INTN)VerticalResolution - (INTN)(NewModeBuffer[ValidCount].Rows * CONSOLE_GLYPH_HEIGHT)) >= 0) ?
++                                            (((INTN)VerticalResolution - (INTN)(NewModeBuffer[ValidCount].Rows * CONSOLE_GLYPH_HEIGHT)) >> 1) : 0;
+   ValidCount++;
+ 
+-  if ((MaxColumns >= 80) && (MaxRows >= 50)) {
+-    NewModeBuffer[ValidCount].Columns = 80;
+-    NewModeBuffer[ValidCount].Rows    = 50;
+-    NewModeBuffer[ValidCount].DeltaX  = (HorizontalResolution - (80 * EFI_GLYPH_WIDTH)) >> 1;
+-    NewModeBuffer[ValidCount].DeltaY  = (VerticalResolution - (50 * EFI_GLYPH_HEIGHT)) >> 1;
++  NewModeBuffer[ValidCount].Columns = (MaxColumns < 80) ? MaxColumns : 80;
++  NewModeBuffer[ValidCount].Rows    = (MaxRows    < 50) ? MaxRows    : 50;
++  if (NewModeBuffer[ValidCount].Columns == 0) {
++    NewModeBuffer[ValidCount].Columns = 1;
++  }
++
++  if (NewModeBuffer[ValidCount].Rows == 0) {
++    NewModeBuffer[ValidCount].Rows = 1;
+   }
+ 
+   NewModeBuffer[ValidCount].GopWidth      = HorizontalResolution;
+   NewModeBuffer[ValidCount].GopHeight     = VerticalResolution;
+   NewModeBuffer[ValidCount].GopModeNumber = GopModeNumber;
++  NewModeBuffer[ValidCount].DeltaX        = (((INTN)HorizontalResolution - (INTN)(NewModeBuffer[ValidCount].Columns * CONSOLE_GLYPH_WIDTH)) >= 0) ?
++                                            (((INTN)HorizontalResolution - (INTN)(NewModeBuffer[ValidCount].Columns * CONSOLE_GLYPH_WIDTH)) >> 1) : 0;
++  NewModeBuffer[ValidCount].DeltaY        = (((INTN)VerticalResolution - (INTN)(NewModeBuffer[ValidCount].Rows * CONSOLE_GLYPH_HEIGHT)) >= 0) ?
++                                            (((INTN)VerticalResolution - (INTN)(NewModeBuffer[ValidCount].Rows * CONSOLE_GLYPH_HEIGHT)) >> 1) : 0;
+   ValidCount++;
+ 
+   //
+@@ -322,8 +420,8 @@ InitializeGraphicsConsoleTextMode (
+       NewModeBuffer[ValidCount].GopWidth      = HorizontalResolution;
+       NewModeBuffer[ValidCount].GopHeight     = VerticalResolution;
+       NewModeBuffer[ValidCount].GopModeNumber = GopModeNumber;
+-      NewModeBuffer[ValidCount].DeltaX        = (HorizontalResolution - (NewModeBuffer[ValidCount].Columns * EFI_GLYPH_WIDTH)) >> 1;
+-      NewModeBuffer[ValidCount].DeltaY        = (VerticalResolution - (NewModeBuffer[ValidCount].Rows * EFI_GLYPH_HEIGHT)) >> 1;
++      NewModeBuffer[ValidCount].DeltaX        = ((INTN)HorizontalResolution - (INTN)(NewModeBuffer[ValidCount].Columns * CONSOLE_GLYPH_WIDTH)) >> 1;
++      NewModeBuffer[ValidCount].DeltaY        = ((INTN)VerticalResolution - (INTN)(NewModeBuffer[ValidCount].Rows * CONSOLE_GLYPH_HEIGHT)) >> 1;
+       ValidCount++;
+     }
+   }
+@@ -507,6 +605,12 @@ GraphicsConsoleControllerDriverStart (
+   //
+   // Initialize the mode which GraphicsConsole supports.
+   //
++  //
++  // Kettle: pick up the persisted cell size before the mode table is built,
++  // because the cell size decides how many columns and rows exist.
++  //
++  KettleApplyConsoleScale ();
++
+   Status = InitializeGraphicsConsoleTextMode (
+              HorizontalResolution,
+              VerticalResolution,
+@@ -884,8 +988,8 @@ GraphicsConsoleConOutOutputString (
+   MaxRow    = Private->ModeData[Mode].Rows;
+   DeltaX    = (UINTN)Private->ModeData[Mode].DeltaX;
+   DeltaY    = (UINTN)Private->ModeData[Mode].DeltaY;
+-  Width     = MaxColumn * EFI_GLYPH_WIDTH;
+-  Height    = (MaxRow - 1) * EFI_GLYPH_HEIGHT;
++  Width     = MaxColumn * CONSOLE_GLYPH_WIDTH;
++  Height    = (MaxRow - 1) * CONSOLE_GLYPH_HEIGHT;
+   Delta     = Width * sizeof (EFI_GRAPHICS_OUTPUT_BLT_PIXEL);
+ 
+   //
+@@ -943,7 +1047,7 @@ GraphicsConsoleConOutOutputString (
+                             NULL,
+                             EfiBltVideoToVideo,
+                             DeltaX,
+-                            DeltaY + EFI_GLYPH_HEIGHT,
++                            DeltaY + CONSOLE_GLYPH_HEIGHT,
+                             DeltaX,
+                             DeltaY,
+                             Width,
+@@ -963,7 +1067,7 @@ GraphicsConsoleConOutOutputString (
+                             DeltaX,
+                             DeltaY + Height,
+                             Width,
+-                            EFI_GLYPH_HEIGHT,
++                            CONSOLE_GLYPH_HEIGHT,
+                             Delta
+                             );
+         }
+@@ -1258,7 +1362,7 @@ GraphicsConsoleConOutSetMode (
+   //
+   // Attempt to allocate a line buffer for the requested mode number
+   //
+-  NewLineBuffer = AllocatePool (sizeof (EFI_GRAPHICS_OUTPUT_BLT_PIXEL) * ModeData->Columns * EFI_GLYPH_WIDTH * EFI_GLYPH_HEIGHT);
++  NewLineBuffer = AllocatePool (sizeof (EFI_GRAPHICS_OUTPUT_BLT_PIXEL) * ModeData->Columns * CONSOLE_GLYPH_WIDTH * CONSOLE_GLYPH_HEIGHT);
+ 
+   if (NewLineBuffer == NULL) {
+     //
+@@ -1612,6 +1716,14 @@ DrawUnicodeWeightAtCursorN (
+   EFI_IMAGE_OUTPUT       *Blt;
+   EFI_STRING             String;
+   EFI_FONT_DISPLAY_INFO  *FontInfo;
++  EFI_GRAPHICS_OUTPUT_PROTOCOL         *GraphicsOutput;
++  EFI_GRAPHICS_OUTPUT_BLT_PIXEL        *Scaled;
++  EFI_GRAPHICS_OUTPUT_BLT_PIXEL        Pixel;
++  UINTN                                BitmapWidth;
++  UINTN                                DstWidth;
++  UINTN                                DstHeight;
++  UINTN                                X;
++  UINTN                                Y;
+ 
+   Private = GRAPHICS_CONSOLE_CON_OUT_DEV_FROM_THIS (This);
+   Blt     = (EFI_IMAGE_OUTPUT *)AllocateZeroPool (sizeof (EFI_IMAGE_OUTPUT));
+@@ -1647,26 +1759,101 @@ DrawUnicodeWeightAtCursorN (
+ 
+   if (Private->GraphicsOutput != NULL) {
+     //
+-    // If Graphics Output protocol exists, using HII Font protocol to draw.
++    // Kettle: HII has no glyph scaling of its own, so render this run at the
++    // native 8x19 cell size into a scratch bitmap, then resize every pixel to
++    // the console cell size when compositing to the panel. HII still does
++    // the layout/kerning, and the console's own wrapping/cursor maths is
++    // untouched because it counts glyph cells, not pixels.
++    //
++    GraphicsOutput = Private->GraphicsOutput;
++
++    //
++    // The registered console font is narrow-only with a fixed 8-pixel cell, so
++    // the run occupies exactly Count cells. HII treats this as the canvas stride
++    // and does not report the used size back, hence the explicit arithmetic.
+     //
+-    Blt->Image.Screen = Private->GraphicsOutput;
++    Blt->Width  = (UINT16)(Count * EFI_GLYPH_WIDTH);
++    Blt->Height = (UINT16)EFI_GLYPH_HEIGHT;
++    Blt->Image.Bitmap = AllocateZeroPool (
++                          (UINTN)Blt->Width * Blt->Height * sizeof (EFI_GRAPHICS_OUTPUT_BLT_PIXEL)
++                          );
++    if (Blt->Image.Bitmap == NULL) {
++      Status = EFI_OUT_OF_RESOURCES;
++      goto Done;
++    }
+ 
+     Status = mHiiFont->StringToImage (
+                          mHiiFont,
+-                         EFI_HII_IGNORE_IF_NO_GLYPH | EFI_HII_DIRECT_TO_SCREEN | EFI_HII_IGNORE_LINE_BREAK,
++                         EFI_HII_IGNORE_IF_NO_GLYPH | EFI_HII_IGNORE_LINE_BREAK,
+                          String,
+                          FontInfo,
+                          &Blt,
+-                         This->Mode->CursorColumn * EFI_GLYPH_WIDTH + Private->ModeData[This->Mode->Mode].DeltaX,
+-                         This->Mode->CursorRow * EFI_GLYPH_HEIGHT + Private->ModeData[This->Mode->Mode].DeltaY,
++                         0,
++                         0,
+                          NULL,
+                          NULL,
+                          NULL
+                          );
++
++    if (!EFI_ERROR (Status)) {
++      BitmapWidth = Count * EFI_GLYPH_WIDTH;
++
++      DstWidth  = Count * CONSOLE_GLYPH_WIDTH;
++      DstHeight = CONSOLE_GLYPH_HEIGHT;
++
++      Scaled = AllocatePool (
++                 DstWidth * DstHeight * sizeof (EFI_GRAPHICS_OUTPUT_BLT_PIXEL)
++                 );
++      if (Scaled == NULL) {
++        Status = EFI_OUT_OF_RESOURCES;
++        goto Done;
++      }
++
++      //
++      // Nearest-neighbour resize from the 8x19 glyph cell to the console cell.
++      // The width ratio (8 -> 13) is not an integer, so map every destination
++      // pixel back to its source instead of replicating whole pixels.
++      //
++      for (Y = 0; Y < DstHeight; Y++) {
++        for (X = 0; X < DstWidth; X++) {
++          UINTN  SrcX;
++          UINTN  SrcY;
++
++          SrcX = ((X % CONSOLE_GLYPH_WIDTH) * EFI_GLYPH_WIDTH) / CONSOLE_GLYPH_WIDTH;
++          SrcY = (Y * EFI_GLYPH_HEIGHT) / CONSOLE_GLYPH_HEIGHT;
++          Pixel = Blt->Image.Bitmap[
++                    (SrcY * BitmapWidth) +
++                    ((X / CONSOLE_GLYPH_WIDTH) * EFI_GLYPH_WIDTH) +
++                    SrcX
++                    ];
++          Scaled[(Y * DstWidth) + X] = Pixel;
++        }
++      }
++
++      Status = GraphicsOutput->Blt (
++                                  GraphicsOutput,
++                                  Scaled,
++                                  EfiBltBufferToVideo,
++                                  0,
++                                  0,
++                                  This->Mode->CursorColumn * CONSOLE_GLYPH_WIDTH + Private->ModeData[This->Mode->Mode].DeltaX,
++                                  This->Mode->CursorRow * CONSOLE_GLYPH_HEIGHT + Private->ModeData[This->Mode->Mode].DeltaY,
++                                  DstWidth,
++                                  DstHeight,
++                                  DstWidth * sizeof (EFI_GRAPHICS_OUTPUT_BLT_PIXEL)
++                                  );
++      FreePool (Scaled);
++    }
+   } else {
+     Status = EFI_UNSUPPORTED;
+   }
+ 
++Done:
++
++  if ((Blt != NULL) && (Blt->Image.Bitmap != NULL)) {
++    FreePool (Blt->Image.Bitmap);
++  }
++
+   if (Blt != NULL) {
+     FreePool (Blt);
+   }
+@@ -1707,7 +1894,7 @@ FlushCursor (
+   EFI_GRAPHICS_OUTPUT_PROTOCOL         *GraphicsOutput;
+   EFI_GRAPHICS_OUTPUT_BLT_PIXEL_UNION  Foreground;
+   EFI_GRAPHICS_OUTPUT_BLT_PIXEL_UNION  Background;
+-  EFI_GRAPHICS_OUTPUT_BLT_PIXEL_UNION  BltChar[EFI_GLYPH_HEIGHT][EFI_GLYPH_WIDTH];
++  EFI_GRAPHICS_OUTPUT_BLT_PIXEL_UNION  BltChar[KETTLE_MAX_CELL_HEIGHT][KETTLE_MAX_CELL_WIDTH];
+   UINTN                                PosX;
+   UINTN                                PosY;
+ 
+@@ -1726,8 +1913,8 @@ FlushCursor (
+   //
+   // Blt a character to the screen
+   //
+-  GlyphX = (CurrentMode->CursorColumn * EFI_GLYPH_WIDTH) + Private->ModeData[CurrentMode->Mode].DeltaX;
+-  GlyphY = (CurrentMode->CursorRow * EFI_GLYPH_HEIGHT) + Private->ModeData[CurrentMode->Mode].DeltaY;
++  GlyphX = (CurrentMode->CursorColumn * CONSOLE_GLYPH_WIDTH) + Private->ModeData[CurrentMode->Mode].DeltaX;
++  GlyphY = (CurrentMode->CursorRow * CONSOLE_GLYPH_HEIGHT) + Private->ModeData[CurrentMode->Mode].DeltaY;
+   if (GraphicsOutput != NULL) {
+     GraphicsOutput->Blt (
+                       GraphicsOutput,
+@@ -1737,9 +1924,9 @@ FlushCursor (
+                       GlyphY,
+                       0,
+                       0,
+-                      EFI_GLYPH_WIDTH,
+-                      EFI_GLYPH_HEIGHT,
+-                      EFI_GLYPH_WIDTH * sizeof (EFI_GRAPHICS_OUTPUT_BLT_PIXEL)
++                      CONSOLE_GLYPH_WIDTH,
++                      CONSOLE_GLYPH_HEIGHT,
++                      CONSOLE_GLYPH_WIDTH * sizeof (EFI_GRAPHICS_OUTPUT_BLT_PIXEL)
+                       );
+   }
+ 
+@@ -1748,10 +1935,15 @@ FlushCursor (
+   //
+   // Convert Monochrome bitmap of the Glyph to BltBuffer structure
+   //
+-  for (PosY = 0; PosY < EFI_GLYPH_HEIGHT; PosY++) {
+-    for (PosX = 0; PosX < EFI_GLYPH_WIDTH; PosX++) {
+-      if ((mCursorGlyph.GlyphCol1[PosY] & (BIT0 << PosX)) != 0) {
+-        BltChar[PosY][EFI_GLYPH_WIDTH - PosX - 1].Raw ^= Foreground.Raw;
++  for (PosY = 0; PosY < CONSOLE_GLYPH_HEIGHT; PosY++) {
++    for (PosX = 0; PosX < CONSOLE_GLYPH_WIDTH; PosX++) {
++      UINTN  SrcX;
++      UINTN  SrcY;
++
++      SrcX = ((CONSOLE_GLYPH_WIDTH - 1 - PosX) * EFI_GLYPH_WIDTH) / CONSOLE_GLYPH_WIDTH;
++      SrcY = (PosY * EFI_GLYPH_HEIGHT) / CONSOLE_GLYPH_HEIGHT;
++      if ((mCursorGlyph.GlyphCol1[SrcY] & (BIT0 << SrcX)) != 0) {
++        BltChar[PosY][PosX].Raw ^= Foreground.Raw;
+       }
+     }
+   }
+@@ -1765,9 +1957,9 @@ FlushCursor (
+                       0,
+                       GlyphX,
+                       GlyphY,
+-                      EFI_GLYPH_WIDTH,
+-                      EFI_GLYPH_HEIGHT,
+-                      EFI_GLYPH_WIDTH * sizeof (EFI_GRAPHICS_OUTPUT_BLT_PIXEL)
++                      CONSOLE_GLYPH_WIDTH,
++                      CONSOLE_GLYPH_HEIGHT,
++                      CONSOLE_GLYPH_WIDTH * sizeof (EFI_GRAPHICS_OUTPUT_BLT_PIXEL)
+                       );
+   }
+ 
+diff --git a/MdeModulePkg/Universal/Console/GraphicsConsoleDxe/GraphicsConsole.h b/MdeModulePkg/Universal/Console/GraphicsConsoleDxe/GraphicsConsole.h
+index ded2aee..ff3536b 100644
+--- a/MdeModulePkg/Universal/Console/GraphicsConsoleDxe/GraphicsConsole.h
++++ b/MdeModulePkg/Universal/Console/GraphicsConsoleDxe/GraphicsConsole.h
+@@ -18,6 +18,7 @@ SPDX-License-Identifier: BSD-2-Clause-Patent
+ #include <Library/BaseMemoryLib.h>
+ #include <Library/MemoryAllocationLib.h>
+ #include <Library/UefiBootServicesTableLib.h>
++#include <Library/UefiRuntimeServicesTableLib.h>
+ #include <Library/HiiLib.h>
+ #include <Library/BaseLib.h>
+ #include <Library/PcdLib.h>
+@@ -34,6 +35,68 @@ extern EFI_NARROW_GLYPH              gUsStdNarrowGlyphData[];
+ 
+ extern UINT32  mNarrowFontSize;
+ 
++//
++// Kettle: integer upscale for console text.
++//
++// The built-in font is 8x19 pixels per cell, which on a 1116x2480 panel gives
++// 139 columns x 130 rows -- correct, but far too small to read at arm's length
++// (for example when the phone is sitting at boot-menu distance). Text is still
++// laid out in native glyph cells: each run is rendered once at 1x and then
++// replicated N x N when composited, so wrapping, cursor and scroll arithmetic
++// stay in the same units. The stock 8x19 cell is small enough to read only at
++// very close range on a high-DPI panel.
++//
++//
++// Console cell size in pixels, derived from the panel rather than as a
++// multiple of the 8x19 built-in glyph cell.
++//
++// UEFI requires mode 0 to be 80x25, and applications such as
++// BootManagerMenuApp search for the PcdSetupConOutColumn/Row mode by size.
++// An integer 2x scale gave 69 columns, so 80x25 disappeared and the boot menu
++// stopped being drawn. 80 * 13 = 1040 fits the 1116px panel, which keeps mode
++// 0 spec-compliant while still making text about 1.6x wider and 2x taller.
++//
++//
++// Runtime so the settings screen can change it and have the choice persist.
++// Defaults to the size that still fits 80 columns on a 1116px panel.
++//
++#define KETTLE_DEFAULT_CELL_WIDTH   13
++#define KETTLE_DEFAULT_CELL_HEIGHT  38
++
++//
++// Upper bounds for the stack scratch buffer in FlushCursor, which must be a
++// compile-time size. The live cell size is clamped to these.
++//
++#define KETTLE_MAX_CELL_WIDTH       32
++#define KETTLE_MAX_CELL_HEIGHT      64
++
++extern UINTN  mKettleCellWidth;
++extern UINTN  mKettleCellHeight;
++
++#define CONSOLE_GLYPH_WIDTH   mKettleCellWidth
++#define CONSOLE_GLYPH_HEIGHT  mKettleCellHeight
++
++//
++// Persisted settings, shared by name and GUID with PlatformBootManagerLib.
++// Layout must stay in sync with BootManagerLib/Settings.c.
++//
++#define KETTLE_SETTINGS_SIGNATURE  SIGNATURE_32 ('K', 'T', 'L', 'S')
++
++typedef struct {
++  UINT32    Signature;
++  UINT32    Version;
++  UINT32    ForceMenu;
++  UINT32    ConsoleScale;
++} KETTLE_SETTINGS;
++
++//
++// Console scale index -> cell size. Index 0 is the stock 8x19 cell.
++//
++typedef struct {
++  UINT16    Width;
++  UINT16    Height;
++} KETTLE_CELL_SIZE;
++
+ typedef union {
+   EFI_NARROW_GLYPH    NarrowGlyph;
+   EFI_WIDE_GLYPH      WideGlyph;
+diff --git a/MdeModulePkg/Universal/Console/GraphicsConsoleDxe/GraphicsConsoleDxe.inf b/MdeModulePkg/Universal/Console/GraphicsConsoleDxe/GraphicsConsoleDxe.inf
+index 975871b..5b2772d 100644
+--- a/MdeModulePkg/Universal/Console/GraphicsConsoleDxe/GraphicsConsoleDxe.inf
++++ b/MdeModulePkg/Universal/Console/GraphicsConsoleDxe/GraphicsConsoleDxe.inf
+@@ -41,6 +41,7 @@
+ 
+ [LibraryClasses]
+   UefiBootServicesTableLib
++  UefiRuntimeServicesTableLib
+   MemoryAllocationLib
+   BaseMemoryLib
+   UefiLib

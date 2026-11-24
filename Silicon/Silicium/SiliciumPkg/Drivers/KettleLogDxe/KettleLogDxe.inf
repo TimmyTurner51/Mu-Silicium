@@ -1,0 +1,44 @@
+## @file
+#  KettleLogDxe - writes boot diagnostics into the logfs partition.
+#
+#  SPDX-License-Identifier: BSD-2-Clause-Patent
+##
+
+[Defines]
+  INF_VERSION                    = 0x00010005
+  BASE_NAME                      = KettleLogDxe
+  FILE_GUID                      = 7E2C4A18-5B93-4F6D-9C21-3A8E5D6B1F04
+  MODULE_TYPE                    = DXE_DRIVER
+  VERSION_STRING                 = 1.0
+  ENTRY_POINT                    = KettleLogDriverEntry
+
+[Sources]
+  KettleLogDxe.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+  MdeModulePkg/MdeModulePkg.dec
+  SiliciumPkg/SiliciumPkg.dec
+
+[LibraryClasses]
+  DebugLib
+  UefiBootServicesTableLib
+  UefiDriverEntryPoint
+  UefiLib
+  MemoryAllocationLib
+  BaseMemoryLib
+  BaseLib
+  PrintLib
+  PcdLib
+  MemoryMapHelperLib
+
+[Protocols]
+  gEfiBlockIoProtocolGuid
+  gEfiPartitionInfoProtocolGuid
+  gEfiGraphicsOutputProtocolGuid
+
+[Guids]
+  gEfiEventReadyToBootGuid
+
+[Depex]
+  TRUE

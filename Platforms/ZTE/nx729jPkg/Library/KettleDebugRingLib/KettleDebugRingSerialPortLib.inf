@@ -1,0 +1,35 @@
+## @file
+#  SerialPortLib that appends everything written to it into a fixed DRAM ring.
+#
+#  Why this exists: Mu's DEBUG() output (memory map, CPU init, driver load order, BDS
+#  decisions) is the most useful diagnostic the firmware produces, but a RELEASE build
+#  compiles it out entirely, and a DEBUG build sends it to FrameBufferSerialPortLib --
+#  the on-screen text, which cannot be read back over EDL.
+#
+#  This library makes DEBUG() go to a reserved DRAM window instead. KettleLogDxe reads
+#  that window into logfs, so the whole firmware's debug output becomes part of a record
+#  that survives a reset and can be pulled with the same read used for ramoops.
+#
+#  The ring is deliberately NOT cleared on init: if a boot dies before KettleLogDxe runs,
+#  its text must still be there on the next boot. Only a successful harvest clears it.
+##
+##
+
+[Defines]
+  INF_VERSION                    = 0x00010005
+  BASE_NAME                      = KettleDebugRingSerialPortLib
+  FILE_GUID                      = 7B3C1E52-9D84-4A11-B6F2-3C58A0D9E417
+  MODULE_TYPE                    = BASE
+  VERSION_STRING                 = 1.0
+  LIBRARY_CLASS                  = SerialPortLib
+  CONSTRUCTOR                    = SerialPortInitialize
+
+[Sources]
+  KettleDebugRingSerialPortLib.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+
+[LibraryClasses]
+  BaseLib
+  BaseMemoryLib

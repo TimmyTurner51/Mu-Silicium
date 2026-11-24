@@ -8,7 +8,14 @@
 ##
 
 [BuildOptions]
+  #
+  # Kettle: this flag is what erases DEBUG() from a RELEASE build -- it makes every
+  # DEBUG() an empty statement before the DebugLib is even consulted. Dropping it is
+  # what allows KettleDebugRingSerialPortLib to receive anything at all.
+  #
+!ifndef KETTLE_DEBUG_CAPTURE
   RELEASE_CLANGPDB_*_CC_FLAGS = -D MDEPKG_NDEBUG
+!endif
   *_CLANGPDB_*_CC_FLAGS       = -Wno-unused-const-variable -Wno-sometimes-uninitialized -Wno-unaligned-access -Wno-deprecated-non-prototype
   *_CLANGPDB_*_CC_FLAGS       = -D CLANG -D ENABLE_SECUREBOOT=$(ENABLE_SECUREBOOT)
   *_CLANGPDB_AARCH64_CC_FLAGS = -D __DEPRECATED_AARCH64_4K_RUNTIME_GRANULARITY
@@ -70,9 +77,19 @@
   gEfiMdePkgTokenSpaceGuid.PcdDebugClearMemoryValue|0xAF
   gEfiMdePkgTokenSpaceGuid.PcdDebugPrintErrorLevel|0x8007EE0F
 !else
+!ifdef KETTLE_DEBUG_CAPTURE
+  #
+  # Kettle: DEBUG() must exist at all in a RELEASE build. 0x2F enables the print path
+  # (bit1) so the DEBUG macro is not compiled out; the level then admits INFO and WARN.
+  #
+  gEfiMdePkgTokenSpaceGuid.PcdDebugPropertyMask|0x2F
+  gEfiMdePkgTokenSpaceGuid.PcdDebugClearMemoryValue|0x00
+  gEfiMdePkgTokenSpaceGuid.PcdDebugPrintErrorLevel|0x8007EE0F
+!else
   gEfiMdePkgTokenSpaceGuid.PcdDebugPropertyMask|0x00
   gEfiMdePkgTokenSpaceGuid.PcdDebugClearMemoryValue|0x00
   gEfiMdePkgTokenSpaceGuid.PcdDebugPrintErrorLevel|0x00000000
+!endif
 !endif
   gEfiMdePkgTokenSpaceGuid.PcdPostCodePropertyMask|0
   gEfiMdePkgTokenSpaceGuid.PcdSpinLockTimeout|10000000
@@ -162,8 +179,17 @@
   SerialPortLib|SiliciumPkg/Library/FrameBufferSerialPortLib/FrameBufferSerialPortLib.inf
   DebugLib|MdePkg/Library/BaseDebugLibSerialPort/BaseDebugLibSerialPort.inf
 !else
+!ifdef KETTLE_DEBUG_CAPTURE
+  #
+  # Kettle: the DEBUG build's DebugLib, but a SerialPortLib that appends to reserved
+  # DRAM rather than drawing on the panel.
+  #
+  SerialPortLib|nx729jPkg/Library/KettleDebugRingLib/KettleDebugRingSerialPortLib.inf
+  DebugLib|MdePkg/Library/BaseDebugLibSerialPort/BaseDebugLibSerialPort.inf
+!else
   SerialPortLib|MdePkg/Library/BaseSerialPortLibNull/BaseSerialPortLibNull.inf
   DebugLib|MdePkg/Library/BaseDebugLibNull/BaseDebugLibNull.inf
+!endif
 !endif
   DebugAgentLib|MdeModulePkg/Library/DebugAgentLibNull/DebugAgentLibNull.inf
   DebugPrintErrorLevelLib|MdePkg/Library/BaseDebugPrintErrorLevelLib/BaseDebugPrintErrorLevelLib.inf

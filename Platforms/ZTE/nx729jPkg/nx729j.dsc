@@ -31,6 +31,13 @@
   #
   SOC_TYPE                       = 0
 
+  #
+  # Kettle: keep the firmware's DEBUG() output alive in RELEASE and route it into the
+  # DRAM ring that KettleLogDxe harvests into logfs. Without this, DEBUG() goes nowhere
+  # in RELEASE and only to the panel in a DEBUG build -- neither is readable over EDL.
+  #
+  DEFINE KETTLE_DEBUG_CAPTURE = TRUE
+
 !include KailuaPkg/KailuaPkg.dsc.inc
 
 [PcdsFixedAtBuild]
@@ -82,3 +89,8 @@
   # ACPI Tables
   #
   nx729j/AcpiTables.inf
+
+  #
+  # Boot diagnostics written to the logfs partition (readable over EDL)
+  #
+  SiliciumPkg/Drivers/KettleLogDxe/KettleLogDxe.inf

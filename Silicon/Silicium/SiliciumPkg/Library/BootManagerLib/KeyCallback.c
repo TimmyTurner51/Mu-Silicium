@@ -16,8 +16,10 @@
 // Global Variables
 //
 STATIC EFI_SIMPLE_TEXT_INPUT_EX_PROTOCOL *mSimpleInExProtocol  = NULL;
-STATIC VOID                              *mNotifyHandle        = NULL;
-STATIC BOOLEAN                            mEnterBootManager    = FALSE;
+STATIC VOID                              *mNotifyHandle         = NULL;
+STATIC VOID                              *mNotifyHandleSettings = NULL;
+STATIC BOOLEAN                            mEnterBootManager     = FALSE;
+STATIC BOOLEAN                            mEnterSettings        = FALSE;
 
 EFI_STATUS
 EFIAPI
@@ -25,6 +27,16 @@ KeyNotify (IN EFI_KEY_DATA *KeyData)
 {
   // Toggle Boot Manager Flag
   mEnterBootManager = TRUE;
+
+  return EFI_SUCCESS;
+}
+
+EFI_STATUS
+EFIAPI
+SettingsNotify (IN EFI_KEY_DATA *KeyData)
+{
+  // Toggle Settings Flag
+  mEnterSettings = TRUE;
 
   return EFI_SUCCESS;
 }
@@ -91,6 +103,24 @@ RegisterKeyNotify ()
     return Status;
   }
 
+  //
+  // Register Volume Down Key Notify for the settings screen. This is only
+  // active during the boot wait, because UnregisterKeyCallback runs before the
+  // boot manager menu takes over -- so Volume Down stays free for the menu's
+  // own list navigation.
+  //
+  KeyData.Key.ScanCode = SCAN_DOWN;
+  Status               = mSimpleInExProtocol->RegisterKeyNotify (
+                                        mSimpleInExProtocol,
+                                        &KeyData,
+                                        &SettingsNotify,
+                                        &mNotifyHandleSettings
+                                        );
+  if (EFI_ERROR (Status)) {
+    DEBUG ((EFI_D_ERROR, "%a: Failed to Register Volume Down Key Notify! Status = %r\n", __FUNCTION__, Status));
+    return Status;
+  }
+
   return EFI_SUCCESS;
 }
 
@@ -129,6 +159,15 @@ UnregisterKeyCallback ()
   if (EFI_ERROR (Status)) {
     DEBUG ((EFI_D_ERROR, "%a: Failed to Unregister Volume Up Key Notify! Status = %r\n", __FUNCTION__, Status));
   }
+
+  if (mNotifyHandleSettings != NULL) {
+    Status = mSimpleInExProtocol->UnregisterKeyNotify (mSimpleInExProtocol, mNotifyHandleSettings);
+    if (EFI_ERROR (Status)) {
+      DEBUG ((EFI_D_ERROR, "%a: Failed to Unregister Volume Down Key Notify! Status = %r\n", __FUNCTION__, Status));
+    }
+
+    mNotifyHandleSettings = NULL;
+  }
 }
 
 BOOLEAN
@@ -136,4 +175,11 @@ EnterBootManager ()
 {
   // Pass Boot Manager Flag
   return mEnterBootManager;
+}
+
+BOOLEAN
+EnterSettings ()
+{
+  // Pass Settings Flag
+  return mEnterSettings;
 }

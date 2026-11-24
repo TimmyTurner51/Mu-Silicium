@@ -10,4 +10,7 @@ UnregisterKeyCallback ();
 BOOLEAN
 EnterBootManager ();
 
+BOOLEAN
+EnterSettings ();
+
 #endif /* _PLATFORM_BOOT_MANAGER_H_ */
