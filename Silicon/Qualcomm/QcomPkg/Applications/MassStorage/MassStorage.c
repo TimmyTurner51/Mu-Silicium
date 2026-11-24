@@ -127,8 +127,13 @@ AssignStorageHandles ()
 
   // Go thru each Storage
   for (UINT8 i = 0; i < ARRAY_SIZE (StorageGuid); i++) {
-    // Compare Assigned and Assignable LUNs
-    if (AssignedMsdLuns + 1 == AssignableMsdLuns) {
+    //
+    // Stop only once every assignable LUN is filled. The original test was
+    // `AssignedMsdLuns + 1 == AssignableMsdLuns`, which is true on the first iteration
+    // when the controller offers a single LUN: it broke out before assigning anything, and
+    // the gadget then advertised an empty LUN that hosts see as "no media".
+    //
+    if (AssignedMsdLuns >= AssignableMsdLuns) {
       break;
     }
 
